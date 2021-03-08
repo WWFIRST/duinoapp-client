@@ -16,12 +16,16 @@ let Serial;
   // if (!Serial && window.chrome && window.chrome.serial) {
   //   Serial = (await import(/* webpackChunkName: "serial-chrome-app" */ './chrome-app')).default;
   // }
-  if (!Serial && navigator && navigator.serial) {
+  if (!Serial) {
+    Serial = (await import(/* webpackChunkName: "serial-websocket" */ './websocket')).default;
+  } else if (!Serial && navigator && navigator.serial) {
     Serial = (await import(/* webpackChunkName: "serial-nav-app" */ './navserial')).default;
   }
   // } else if (!Serial && navigator && navigator.usb) {
   //   Serial = (await import(/* webpackChunkName: "serial-webusb-app" */ './webusb')).default;
-  if (!Serial) Serial = (await import(/* webpackChunkName: "serial-base" */ './base-serial')).default;
+  if (!Serial) {
+    Serial = (await import(/* webpackChunkName: "serial-base" */ './base-serial')).default;
+  }
   Vue.use(new Serial());
 })();
 
