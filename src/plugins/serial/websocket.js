@@ -49,6 +49,7 @@ class WebSocketAsync {
   }
 
   async connect() {
+    console.log('connect');
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(this._url, this._protocols);
       socket.binaryType = 'arraybuffer';
@@ -63,6 +64,7 @@ class WebSocketAsync {
       };
 
       socket.onerror = (event) => {
+        console.log('caught error', event);
         reject(event);
       };
     });
@@ -156,18 +158,27 @@ class WebSocketSerial extends BaseSerial {
     }
 
     if (this.connected) {
+      console.log('disconnect device');
       this.disconnect();
     }
 
     this._currentSocket = this._getSocket(value);
     if (this._currentSocket) {
+      console.log('got a socket');
       Vue.set(this, 'currentDevice', value);
       this.emit('currentDevice', value);
       await this.connect();
     } else {
+      console.log('no socket');
       Vue.set(this, 'currentDevice', null);
       this.emit('currentDevice', null);
     }
+  }
+
+  async clearCurrentDevice() {
+    console.log('clear device');
+    Vue.set(this, 'currentDevice', null);
+    this.emit('currentDevice', null);
   }
 
   async writeBuff(buff) {
@@ -227,6 +238,11 @@ class WebSocketSerial extends BaseSerial {
       console.log('websocket-to-serial: connected');
     } catch (err) {
       console.log('websocket-to-serial: connection failed', err);
+      // Pop an error dialog.  Is there a cleaner way to do this?
+      // Maybe show connection statusi (connected/not connected/connecting) in footer bar?
+      alert('Failed to connect to device.');
+      // show 'SELECT DEVICE PORT'
+      this.clearCurrentDevice();
     }
   }
 
