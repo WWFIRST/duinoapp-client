@@ -49,7 +49,7 @@ class WebSocketAsync {
   }
 
   async connect() {
-    console.log('connect');
+    console.log('websocket-to-serial: entering connect');
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(this._url, this._protocols);
       socket.binaryType = 'arraybuffer';
@@ -64,7 +64,7 @@ class WebSocketAsync {
       };
 
       socket.onerror = (event) => {
-        console.log('caught error', event);
+        console.log('websocket-to-serial: caught error', event);
         reject(event);
       };
     });
@@ -80,10 +80,15 @@ class WebSocketSerial extends BaseSerial {
     this._currentSocket = null; // WebSocket
     this._beforeWriteFn = null;
     this._writeLock = false;
+    this.status = 'disconnected';
     this.implementation = 'websocket';
   }
 
   _getSocket(url) {
+    if (!url) {
+      return undefined;
+    }
+
     let socket = this._sockets[url];
     if (!socket) {
       try {
@@ -115,6 +120,8 @@ class WebSocketSerial extends BaseSerial {
 
           if (this._currentSocket === socket) {
             this.connected = false;
+            this.connecting = false;
+            this._setStatus('disconnected');
             this.emit('disconnect', this.currentDevice);
             console.log('websocket-to-serial: disconnected');
           }
@@ -127,6 +134,12 @@ class WebSocketSerial extends BaseSerial {
       this._sockets[url] = socket;
     }
     return socket;
+  }
+
+  _setStatus(status) {
+    this.status = status;
+    Vue.set(this, 'status', status);
+    this.emit('status', status);
   }
 
   async requestDevice() {
@@ -157,28 +170,25 @@ class WebSocketSerial extends BaseSerial {
       return;
     }
 
-    if (this.connected) {
-      console.log('disconnect device');
+    if (this.connecting || this.connected) {
+      console.log('websocket-to-serial: disconnect device');
       this.disconnect();
     }
 
     this._currentSocket = this._getSocket(value);
     if (this._currentSocket) {
-      console.log('got a socket');
       Vue.set(this, 'currentDevice', value);
       this.emit('currentDevice', value);
       await this.connect();
     } else {
-      console.log('no socket');
       Vue.set(this, 'currentDevice', null);
       this.emit('currentDevice', null);
     }
   }
 
   async clearCurrentDevice() {
-    console.log('clear device');
-    Vue.set(this, 'currentDevice', null);
-    this.emit('currentDevice', null);
+    console.log('websocket-to-serial: clear device');
+    this.setCurrentDevice(null);
   }
 
   async writeBuff(buff) {
@@ -228,21 +238,23 @@ class WebSocketSerial extends BaseSerial {
     }
 
     try {
+      this.connecting = true;
+      this._setStatus('connecting');
       await this._currentSocket.connect();
 
       // set initial baud
       this._currentSocket.send(`baud:${this.baud}`);
 
+      this.connecting = false;
       this.connected = true;
+      this._setStatus('connected');
       this.emit('connected', this.currentDevice);
       console.log('websocket-to-serial: connected');
     } catch (err) {
       console.log('websocket-to-serial: connection failed', err);
-      // Pop an error dialog.  Is there a cleaner way to do this?
-      // Maybe show connection statusi (connected/not connected/connecting) in footer bar?
-      alert('Failed to connect to device.');
-      // show 'SELECT DEVICE PORT'
-      this.clearCurrentDevice();
+      this.connecting = false;
+      this.connected = false;
+      this._setStatus('disconnected');
     }
   }
 
@@ -254,6 +266,11 @@ class WebSocketSerial extends BaseSerial {
     console.log('websocket-to-serial: disconnect requested');
     await this._currentSocket.close(1000);
     this.emit('disconnect', this.currentDevice);
+  }
+
+  async reconnect() {
+    await this.disconnect();
+    await this.connect();
   }
 
   async setSignals(signals) {
