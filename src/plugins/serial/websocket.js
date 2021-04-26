@@ -34,14 +34,23 @@ class WebSocketAsync {
       const socket = this._socket;
       this._socket = null;
 
+      // remove onmessage listener
+      socket.removeEventListener('message', this.onmessage);
+
       // websocket is closing asynchronously, we need to wait
       // for the corresponding onclose to fire, so we attach
       // another listener here and promisify
       return new Promise((resolve) => {
-        socket.addEventListener('close', () => {
+        // close won't fire when trying to close socket that is
+        // already in closed/closing state
+        if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+          socket.addEventListener('close', () => {
+            resolve();
+          });
+          socket.close(code, reason);
+        } else {
           resolve();
-        });
-        socket.close(code, reason);
+        }
       });
     }
 
@@ -172,7 +181,7 @@ class WebSocketSerial extends BaseSerial {
 
     if (this.connecting || this.connected) {
       console.log('websocket-to-serial: disconnect device');
-      this.disconnect();
+      await this.disconnect();
     }
 
     this._currentSocket = this._getSocket(value);
