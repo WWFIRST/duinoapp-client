@@ -34,14 +34,23 @@ class WebSocketAsync {
       const socket = this._socket;
       this._socket = null;
 
+      // remove onmessage listener
+      socket.removeEventListener('message', this.onmessage);
+
       // websocket is closing asynchronously, we need to wait
       // for the corresponding onclose to fire, so we attach
       // another listener here and promisify
       return new Promise((resolve) => {
-        socket.addEventListener('close', () => {
+        // close won't fire when trying to close socket that is
+        // already in closed/closing state
+        if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+          socket.addEventListener('close', () => {
+            resolve();
+          });
+          socket.close(code, reason);
+        } else {
           resolve();
-        });
-        socket.close(code, reason);
+        }
       });
     }
 
@@ -49,6 +58,7 @@ class WebSocketAsync {
   }
 
   async connect() {
+    console.log('websocket-to-serial: entering connect');
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(this._url, this._protocols);
       socket.binaryType = 'arraybuffer';
@@ -63,6 +73,7 @@ class WebSocketAsync {
       };
 
       socket.onerror = (event) => {
+        console.log('websocket-to-serial: caught error', event);
         reject(event);
       };
     });
@@ -78,10 +89,15 @@ class WebSocketSerial extends BaseSerial {
     this._currentSocket = null; // WebSocket
     this._beforeWriteFn = null;
     this._writeLock = false;
+    this.status = 'disconnected';
     this.implementation = 'websocket';
   }
 
   _getSocket(url) {
+    if (!url) {
+      return undefined;
+    }
+
     let socket = this._sockets[url];
     if (!socket) {
       try {
@@ -113,6 +129,8 @@ class WebSocketSerial extends BaseSerial {
 
           if (this._currentSocket === socket) {
             this.connected = false;
+            this.connecting = false;
+            this._setStatus('disconnected');
             this.emit('disconnect', this.currentDevice);
             console.log('websocket-to-serial: disconnected');
           }
@@ -125,6 +143,12 @@ class WebSocketSerial extends BaseSerial {
       this._sockets[url] = socket;
     }
     return socket;
+  }
+
+  _setStatus(status) {
+    this.status = status;
+    Vue.set(this, 'status', status);
+    this.emit('status', status);
   }
 
   async requestDevice() {
@@ -155,8 +179,9 @@ class WebSocketSerial extends BaseSerial {
       return;
     }
 
-    if (this.connected) {
-      this.disconnect();
+    if (this.connecting || this.connected) {
+      console.log('websocket-to-serial: disconnect device');
+      await this.disconnect();
     }
 
     this._currentSocket = this._getSocket(value);
@@ -168,6 +193,11 @@ class WebSocketSerial extends BaseSerial {
       Vue.set(this, 'currentDevice', null);
       this.emit('currentDevice', null);
     }
+  }
+
+  async clearCurrentDevice() {
+    console.log('websocket-to-serial: clear device');
+    this.setCurrentDevice(null);
   }
 
   async writeBuff(buff) {
@@ -217,16 +247,23 @@ class WebSocketSerial extends BaseSerial {
     }
 
     try {
+      this.connecting = true;
+      this._setStatus('connecting');
       await this._currentSocket.connect();
 
       // set initial baud
       this._currentSocket.send(`baud:${this.baud}`);
 
+      this.connecting = false;
       this.connected = true;
+      this._setStatus('connected');
       this.emit('connected', this.currentDevice);
       console.log('websocket-to-serial: connected');
     } catch (err) {
       console.log('websocket-to-serial: connection failed', err);
+      this.connecting = false;
+      this.connected = false;
+      this._setStatus('disconnected');
     }
   }
 
@@ -238,6 +275,11 @@ class WebSocketSerial extends BaseSerial {
     console.log('websocket-to-serial: disconnect requested');
     await this._currentSocket.close(1000);
     this.emit('disconnect', this.currentDevice);
+  }
+
+  async reconnect() {
+    await this.disconnect();
+    await this.connect();
   }
 
   async setSignals(signals) {
